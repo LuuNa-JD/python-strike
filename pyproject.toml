@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "python-strike"
+version = "0.1.0"
+description = "Minimal FPS in 3D with Panda3D (counter-strike like)"
+authors = ["Julien Denizot"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+panda3d = "^1.10.15"
+panda3d-gltf = "^1.2.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
