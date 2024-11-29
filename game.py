@@ -1,78 +1,100 @@
-# game.py
-from environment import Environment
-from player import Player
-from controls import Controls
-from direct.showbase.ShowBase import ShowBase
+from domain.environment import Environment
+from domain.player import Player
+from interfaces.controls_adapter import Controls
+import simplepbr
 from panda3d.core import (
-    WindowProperties, LVector3, ClockObject, CollisionTraverser,
+    WindowProperties, CollisionTraverser,
     CollisionHandlerPusher, BitMask32, loadPrcFileData
 )
-loadPrcFileData('', 'notify-level info')
+from domain.monster import Monster
+from use_cases.move_player import move_player
+
+loadPrcFileData('', 'win-size 1920 1080')
+loadPrcFileData('', 'fullscreen 1')
+loadPrcFileData('', 'textures-power-2 none')
+loadPrcFileData('', 'framebuffer-multisample 0')
+loadPrcFileData('', 'multisamples 0')
+loadPrcFileData('', 'interpolate-frames 1')
+loadPrcFileData('', 'sync-video false')
 
 
-class PythonStrike(ShowBase):
-    def __init__(self):
-        super().__init__()
+class PythonStrike:
+    def __init__(self, base):
+        self.base = base
+
+        simplepbr.init(
+            render_node=self.base.render,
+            enable_shadows=False,
+            max_lights=20,
+            msaa_samples=8,
+            shadow_bias=0.05,
+            enable_fog=True,
+            use_occlusion_maps=True,
+            use_emission_maps=True,
+            use_normal_maps=True
+        )
 
         # Configuration de la fenêtre
         props = WindowProperties()
         props.setCursorHidden(True)
-        self.win.requestProperties(props)
-        self.disableMouse()
+        props.setFullscreen(True)
+        self.base.win.requestProperties(props)
+        self.base.disableMouse()
 
         # Gestion des collisions
-        self.cTrav = CollisionTraverser()
-        self.pusher = CollisionHandlerPusher()
-
-        # Masques de collision
+        self.base.cTrav = CollisionTraverser()
+        self.base.pusher = CollisionHandlerPusher()
         self.FLOOR_MASK = BitMask32.bit(1)
 
         # Initialisation des modules
         self.environment = Environment(
-            self.loader, self.render, self.FLOOR_MASK)
+            self.base.loader, self.base.render, self.FLOOR_MASK)
         self.player = Player(
-            self.camera, self.render, self.cTrav, self.pusher, self.FLOOR_MASK
+            self.base.camera, self.base.render, self.base.cTrav,
+            self.base.pusher, self.FLOOR_MASK,
+            self.base.loader
         )
-        self.controls = Controls(self)
+        self.controls = Controls(self.base)
+        self.monster = Monster(
+            self.base.loader,
+            self.base.render,
+            "assets/monsters/fat/fat.gltf",
+            position=(5, 5, 0),
+            FLOOR_MASK=self.FLOOR_MASK
+        )
 
-        # Position et orientation initiales de la caméra
-        self.camera.setPos(3, 0, 3)
-        self.camera.setHpr(180, 0, 0)
+        # Position caméra
+        lens = self.base.cam.node().getLens()
+        lens.setNear(0.05)
+        lens.setFov(90)
+        self.base.camera.setPos(0, -1, 1.5)
+        self.base.camera.lookAt(0, 0, 1.5)
 
         # Tâches
-        self.taskMgr.add(self.move_task, "move_task")
+        self.base.taskMgr.add(self.move_task, "move_task")
+        self.base.taskMgr.add(
+            self.monster_behavior_task, "monster_behavior_task"
+        )
 
     def move_task(self, task):
-        key_map = self.controls.key_map
-        speed = 7 * ClockObject.getGlobalClock().getDt()
-        direction = LVector3(0, 0, 0)
-
-        if key_map["forward"]:
-            direction.y += speed
-        if key_map["backward"]:
-            direction.y -= speed
-        if key_map["left"]:
-            direction.x -= speed
-        if key_map["right"]:
-            direction.x += speed
-
-        # Calcul de la nouvelle position
-        new_position = self.camera.getPos() + self.camera.getQuat().xform(
-            direction)
-
-        # Ajuste la hauteur en fonction du raycast
-        self.cTrav.traverse(self.render)
-        entries = list(self.player.ray_queue.entries)
-        entries.sort(key=lambda x: x.getSurfacePoint(self.render).getZ())
-
-        if entries:
-            ground_z = entries[0].getSurfacePoint(self.render).getZ()
-            new_position.z = ground_z + 1
-
-        self.camera.setPos(new_position)
+        """
+        Gestion des déplacements du joueur.
+        """
+        move_player(
+            self.base.camera, self.controls, self.base.cTrav,
+            self.base.render, self.player
+        )
+        self.player.update_state(self.controls.key_map)
         return task.cont
 
-
-if __name__ == "__main__":
-    game = PythonStrike()
-    game.run()
+    def monster_behavior_task(self, task):
+        player_position = (
+            self.base.camera.getX(),
+            self.base.camera.getY(),
+            self.base.camera.getZ()
+        )
+        if self.monster.state == "patrolling":
+            self.monster.patrol()
+        elif self.monster.state == "chasing":
+            self.monster.chase(player_position)
+        return task.cont
